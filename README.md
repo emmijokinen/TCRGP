@@ -11,7 +11,9 @@ To use TCRGP, you will need to have
 * And some other Python packages, which are imported at the beginning of tcrgp.py
 
 ## Data
-The data in folder data has been obtained from \[2\], \[3\] and \[4\]
+The data in folder *data* has been obtained from \[2\], \[3\] and \[4\].
+
+Other folders (*training_data, models, results*) and their contents exist for demonstrative purposes and they are utilized by Example.ipynb.
 
 
 # References

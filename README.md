@@ -2,7 +2,7 @@
 TCRGP is a novel Gaussian process method that can predict if TCRs recognize certain epitopes. This method can utilize different CDR sequences from both TCRα and TCRβ chains from single-cell data and learn which CDRs are important in recognizing the different epitopes. TCRGP has been developed at Aalto University.
 
 * For a comprehensive description of TCRGP see \[1\]
-* For examples of useage, see Examples.ipynb
+* For examples of usage, see Examples.ipynb
 
 ## Dependencies
 To use TCRGP, you will need to have

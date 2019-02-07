@@ -79,7 +79,7 @@ def check_align_cdr3s(cdr3s,lmaxtrain):
     cdr3s_letter =[]
     if lmaxtest>lmaxtrain:
         print('Maximum length for test CDR3s is '+str(lmaxtest)+
-              ', but the maximum length for the trained model is '+str(lmaxes[0])+'.')
+              ', but the maximum length for the trained model is '+str(lmaxtrain)+'.')
         print('You need to train a new model with longer sequences to get predictions for all sequences.')   
         
     for i in range(len(cdr3s)):
@@ -288,7 +288,7 @@ def extract_cdrs_minimal_v(vgenes, organism, chain, cdrtypes,correctVs=True):
     if correctVs:
         vgenes=[correct_vgene(v,chain) for v in vgenes]
     
-    cdrs12 = create_cdr_dict(organism,chain)
+    cdrs12 = create_cdr_dict(species=[organism])
     vc_list = create_minimal_v_cdr_list(organism,chain,cdrtypes)
     
     ics = []
@@ -686,7 +686,6 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=50
         p, _ = m.predict_y(X)
     
     auc = roc_auc(y,p) # Training AUC
-    # param_list: [lmaxes,lengthscales,variance,q_mu,q_sqrt, pc,y, X (,Z,mbs)]
     return auc, param_list
 
 def predict(filename, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b='cdr3b',delimiter=','):
@@ -721,7 +720,7 @@ def predict(filename, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b=
         seq_lists.append(tcrs2nums(cdr3as))
         
     if any([ c in ['cdr1','cdr2','cdr25'] for c in cdrAtypes]):
-        cdrs = extract_cdrs_minimal_v(vas, organism, 'A', cdrAtypes, correct=True)
+        cdrs = extract_cdrs_minimal_v(vas, organism, 'A', cdrAtypes, correctVs=True)
         for clist in cdrs:
             if len(clist)>0:
                 seq_lists_letter.append(clist)
@@ -736,7 +735,7 @@ def predict(filename, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b=
         seq_lists.append(tcrs2nums(cdr3bs))
         
     if any([ c in ['cdr1','cdr2','cdr25'] for c in cdrBtypes]):
-        cdrs = extract_cdrs_minimal_v(vbs, organism, 'B', cdrBtypes, correct=True)
+        cdrs = extract_cdrs_minimal_v(vbs, organism, 'B', cdrBtypes, correctVs=True)
         for clist in cdrs:
             if len(clist)>0:
                 seq_lists_letter.append(clist)

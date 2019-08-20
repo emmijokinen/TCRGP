@@ -13,11 +13,19 @@ To use TCRGP, you will need to have
 ## Data
 The data in folder *data* has been obtained from \[2\], \[3\] and \[4\].
 
-Other folders (*training_data, models, results*) and their contents exist for demonstrative purposes and they are utilized by Example.ipynb.
+Folder *training_data/paper* contains training data files used for the paper. 
+Folder *training_data/examples* can be utilized with the example.ipynb
+Folder *models* contains pretrained models for different epitopes.
+Folder *results* can be used to store result files.
 
+## Updates
+TCRGP has been updated in August 20th, 2019, and is not fully compatible with the older version.
+
+## Analysis with TCRGP
+Software and data for the single-cell RNA-sequencing analysis of HCC-patients from \[1\] are available at https://github.com/janihuuh/tcrgp_manu_hcc.
 
 # References
-\[1\] Emmi Jokinen, Markus Heinonen, Jani Huuhtanen, Satu Mustjoki and Harri Lähdesmäki. (2018). TCRGP: Determining epitope specificity of T cell receptors. (submitted)
+\[1\] Emmi Jokinen, Jani Huuhtanen, Satu Mustjoki, Markus Heinonen, and Harri Lähdesmäki. (2019). Determining epitope specificity of T cell receptors with TCRGP. (submitted)
 
 \[2\] Shugay, M. *et al.* (2017). VDJdb: a curated database of T-cell receptor sequences with known antigen specificity. *Nucleic acids research,* **46**(D1), D419-D427
 

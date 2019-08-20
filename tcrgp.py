@@ -15,14 +15,14 @@ alphabet='ARNDCEQGHILKMFPSTWYV-'
 # Handle sequence data and features 
 
 def max_len(seq_list):
-    """Returns the maximum sequence length within the given list"""
+    """Returns the maximum sequence length within the given list of lists."""
     lmax=0
     for seq in seq_list:
         lmax=max( lmax, len(seq) )
     return lmax
 
 def tcrs2nums(tcrs):
-    """Converts a list of (TCR) sequences to numbers. Each letter is changed to its index in alphabet"""
+    """Converts a list of (TCR) amino acid sequences to numbers. Each letter is changed to its index in the alphabet"""
     tcrs_num=[]
     n=len(tcrs)
     for i in range(n):
@@ -33,14 +33,26 @@ def tcrs2nums(tcrs):
         tcrs_num.append(nums)
     return tcrs_num
 
+def nums2tcrs(nums):
+    """Converts a list containing lists of numbers to amino acid sequences. Each number is considered to be an index of the alphabet."""
+    tcrs_letter=[]
+    n=len(nums)
+    for i in range(n):
+        num=nums[i]
+        tcr=''
+        for j in range(len(num)):
+            tcr+=alphabet[num[j]]
+        tcrs_letter.append(tcr)
+    return tcrs_letter
+
 def remove_starred(cdrs):
-    """Returned cdrs are like the given cdrs, but cdrs with stars are replaced by an empty entry.
+    """Returned cdrs are like the given cdrs, but cdrs with stars (*) are replaced by an empty entry.
     Ikeep contains the locations of cdrs which did not contain stars."""
-    Ikeep = np.ones((len(cdr1s),1),dtype=bool)
+    Ikeep = np.ones((len(cdrs),),dtype=bool)
     for i in range(len(cdrs)):
-        if '*' in cdrs:
+        if '*' in cdrs[i]:
             cdrs[i]=[]
-            Ic[i]=False
+            Ikeep[i]=False
     return cdrs, Ikeep
 
 def add_gap(tcr,l_max,gap_char='-'):
@@ -58,7 +70,7 @@ def align_gap(tcrs,l_max=None,gap_char='-'):
     if l_max == None:
         l_max = max_len(tcrs)
     else:
-        assert (l_max >= max_len(tcrs)), "Given max length must be greater than or equal to the max lenght of given sequences, "+str(max(ls))
+        assert (l_max >= max_len(tcrs)), "Given max length must be greater than or equal to the max lenght of given sequences, "+str(max_len(tcrs))
     
     tcrs_aligned=[]
     for tcr in tcrs:
@@ -68,22 +80,20 @@ def align_gap(tcrs,l_max=None,gap_char='-'):
 def check_align_cdr3s(cdr3s,lmaxtrain):
     """Check cdr3s for too long sequences or sequences containing characters outside alphabet
     returns cdr3s_letter (proper cdr3s aligned, but improper sequences are left as they are)
-            cdr3s_aligned (proper cdr3s aligned, places of improper sequences are left empty)
-            Ikeep3 (locations of proper cdr3s)
+            cdr3s_aligned (proper cdr3s aligned, places of improper sequences are left empty),
+            and Ikeep3 (locations of proper cdr3s)
     Here improper means sequences that are longer than those in the training data or contain
     characters outside the used alphabet."""
-    lmaxtest=max_len(cdr3s)
-    
+    lmaxtest=max_len(cdr3s) 
     Ikeep3=np.ones((len(cdr3s),),dtype=bool)
     cdr3s_aligned=[]
     cdr3s_letter =[]
     if lmaxtest>lmaxtrain:
-        print('Maximum length for test CDR3s is '+str(lmaxtest)+
-              ', but the maximum length for the trained model is '+str(lmaxtrain)+'.')
-        print('You need to train a new model with longer sequences to get predictions for all sequences.')   
+        print('Maximum length of the given CDR3s is '+str(lmaxtest)+', but the maximum length is set to '+str(lmaxtrain)+'.')
+        print('Longer sequences will be ignored.')   
         
     for i in range(len(cdr3s)):
-        if len(cdr3s[i])>lmaxtrain or not all([ c in alphabet for c in cdr3s[i]]):
+        if len(cdr3s[i])<3 or len(cdr3s[i])>lmaxtrain or not all([ c in alphabet for c in cdr3s[i]]):
             Ikeep3[i]=False
             cdr3s_aligned.append([])
             cdr3s_letter.append(cdr3s[i])
@@ -96,13 +106,13 @@ def check_align_cdr3s(cdr3s,lmaxtrain):
 
 def clip_cdr3s(cdr3s,clip):
     """Clip amino acids from the ends of the given cdr3s, clip[0] from beginning and clip[1] from the end.
-    Clipping should be done after the alignment."""
+    Clipping should be done after the sequences are aligned."""
     for i in range(len(cdr3s)):
         cdr3s[i]=cdr3s[i][clip[0]:-clip[1]]
     return cdr3s
 
 def subsmatFromAA2(identifier,data_file='data/aaindex2.txt'):
-    """Retrieve a substitution matrix from AAindex2-file, scale it between 0 and 1, and include gap"""
+    """Retrieve a substitution matrix from AAindex2-file, scale it between 0 and 1, and add gap"""
     with open(data_file,'r') as f:
         for line in f:
             if identifier in line:
@@ -125,8 +135,7 @@ def subsmatFromAA2(identifier,data_file='data/aaindex2.txt'):
                 subsmat[j,i]=vals[j0]
             i0+=1    
             if i0>=len(rows):
-                break
-        
+                break        
     subsmat[:-1,:-1]+=np.abs(np.min(subsmat))+1
     subsmat[:-1,:-1]/=np.max(subsmat)
     subsmat[-1,-1]=np.min(np.diag(subsmat)[:-1])
@@ -134,7 +143,7 @@ def subsmatFromAA2(identifier,data_file='data/aaindex2.txt'):
     return subsmat    
 
 def get_pcs(subsmat,d):
-    """Get first d pca-components from the given substitution matrix (or other matrix)"""
+    """Get first d pca-components from the given substitution matrix."""
     pca = PCA(d)
     pca.fit(subsmat)
     pc = pca.components_
@@ -175,20 +184,16 @@ def file2dict(filename,key_fields,store_fields,delimiter='\t'):
             if key not in sub_dict:
                 sub_dict[key] = []
             sub_dict[key].append(store)
-
     return dictionary
     
 def create_cdr_dict(alignment='imgt',species=['human']):
     """Creates a dictionary of the CDRs (1, 2, and 2.5) corresponding to each V-gene. 
     If alignment='imgt', the CDRs will be aligned according to imgt definitions.
-    Dictionary has form cdrs12[organism][chain][V-gene] = [cdr1,cdr2,cdr2.5]"""
-    
+    Dictionary has form cdrs12[organism][chain][V-gene] = [cdr1,cdr2,cdr2.5]"""   
     cdrs_all=file2dict('data/alphabeta_db.tsv',key_fields=['organism','chain','region','id'],store_fields=['cdrs'])
-
     cdrs = {}
     for organism in species:
         cdrs[organism]={}
-
         for chain in 'AB':
             cdrs[organism][chain]={}
             for g in cdrs_all[organism][chain]['V']:
@@ -196,13 +201,12 @@ def create_cdr_dict(alignment='imgt',species=['human']):
                     c = cdrs_all[organism][chain]['V'][g][0][0].replace('.','-').split(';')[:-1]
                 else:
                     c = cdrs_all[organism][chain]['V'][g][0][0].replace('.','').split(';')[:-1]
-                cdrs[organism][chain][g]=c
-                
+                cdrs[organism][chain][g]=c                
     return cdrs
 
 def correct_vgene(v, chain='B'):
     """Makes sure that the given v gene is in correct format,
-    handles a different few formats."""
+    handles a few different formatsformats."""
     if chain is 'B':
         v = v.replace('TCR','TR').replace('TRBV0','TRBV').replace('-0','-')
     elif chain is 'A':
@@ -239,7 +243,7 @@ def split_v(v):
 
 def create_minimal_v_cdr_list(organism='human',chain='B',cdrtypes=['cdr1','cdr2','cdr25']):
     """Create a list that determines minimal level of information (subgroup, name, allele) 
-    needed to determine the wanted cdrtypes.
+    needed to determine the wanted cdrtypes (cdr1, cdr2, cdr25).
     Possible organism are human and mouse and possible chains are A and B."""
     cdrs = create_cdr_dict(species=[organism])
     v_list=[]
@@ -262,8 +266,8 @@ def create_minimal_v_cdr_list(organism='human',chain='B',cdrtypes=['cdr1','cdr2'
     vc_list=[]
     subgroups = np.unique(v_array[:,1])
     for sub in subgroups:
-        Is = sub==v_array[:,1]    
-        cs = c_array[Is,i_cs]
+        Is = sub==v_array[:,1]
+        cs = c_array[Is,:][:,i_cs] # all CDRs with given subgroup
         c = ''.join(cs[0])
         if np.all(list(''.join(x)==c for x in cs)):
             vc_list.append([sub,'any','any',cs[0]])
@@ -272,19 +276,25 @@ def create_minimal_v_cdr_list(organism='human',chain='B',cdrtypes=['cdr1','cdr2'
             names = np.unique(name_list)
             for name in names:
                 In = name==name_list
-                cs2 = cs[In]
-                c = ''.join(cs2[0])
-                if np.all(list(''.join(x)==c for x in cs2)):
-                    vc_list.append([sub,name,'any',cs2[0]])
+                cn = cs[In] # all CDRs with given gene name
+                c = ''.join(cn[0])
+                if np.all(list(''.join(x)==c for x in cn)):
+                    vc_list.append([sub,name,'any',cn[0]])
                 else:        
                     alleles = v_array[Is,3][In]
-                    for allele,c in zip(alleles,cs2):
+                    for allele,c in zip(alleles,cn):
                         vc_list.append([sub,name,allele,c])
     return vc_list
 
-def extract_cdrs_minimal_v(vgenes, organism, chain, cdrtypes,correctVs=True):
+def extract_cdrs_from_v(vgenes, organism, chain, cdrtypes,correctVs=True,check_v='none'):
     """Get requested cdrs (cdr_types) from the vgenes where possible. 
-    If all requested cdrs could not be obtained from a vgenes, empty entries are returned in their place"""
+    If all requested cdrs could not be obtained from a vgenes, empty entries are returned in their place
+    organism: human/mouse
+    chain: A/B
+    cdrtypes: some subset of ['cdr1','cdr2','cdr25']
+    correctVs: If True, attempt to chage V-genes in correct format
+    check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
+             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails."""
     if correctVs:
         vgenes=[correct_vgene(v,chain) for v in vgenes]
     
@@ -293,11 +303,11 @@ def extract_cdrs_minimal_v(vgenes, organism, chain, cdrtypes,correctVs=True):
     
     ics = []
     if 'cdr1' in cdrtypes:
-        ics.appens(0)
+        ics.append(0)
     if 'cdr2' in cdrtypes:
-        ics.appens(1)
+        ics.append(1)
     if 'cdr25' in cdrtypes:
-        ics.appens(2)
+        ics.append(2)
     
     cdrs=[[],[],[]] 
     for v in vgenes:
@@ -305,24 +315,27 @@ def extract_cdrs_minimal_v(vgenes, organism, chain, cdrtypes,correctVs=True):
             cs = cdrs12[organism][chain][v]
             for i in ics:
                 cdrs[i].append(cs[i])
-        except:
-            vs=split_v(v)
+        except KeyError:
+            if check_v=='none':
+                raise KeyError("Invalid V-gene: "+v+". Use check_v='ignore' to ignore TCRs with invalid V-genes, or check_v='deduce' to try deducing requsted CDRs.")
             notFound=True
-            for row in vc_list:
-                if ((vs[1]==row[0]) and ((vs[2]==row[1]) or (row[1]=='any') or (vs[2]=='1' and row[1]==''))
-                    and (vs[3]==row[2] or row[2]=='any')):
-                    
-                    for i in ics:
-                        cdrs[i].append(row[3][i])
-                    notFound=False
-                    continue
+            if check_v=='deduce': 
+                _,sub,name,allele=split_v(v)
+                
+                for row in vc_list:
+                    if ( (row[0]==sub) and ( (row[1]==name) or (row[1]=='any') or (name=='1' and row[1]=='') )
+                        and (row[2]==allele or row[2]=='any') ):
+
+                        for i in ics:
+                            cdrs[i].append(row[3][i])
+                        notFound=False
+                        continue
             if notFound:
                 for i in ics:
                     cdrs[i].append([])   
     return cdrs
 
-
-def read_vs_cdr3s_epis_subs(datafile,va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope',subs='subjects',delimiter=','):
+def read_vs_cdr3s_epis_subs(datafile,va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', epis='epitope',subs='subject',delimiter=',',encoding='bytes'):
     """Reads VA-genes, VB-genes, CDR3As, CDR3Bs from the given data file. 
     The columns are determined by va, vb, cdr3a, and cdr3b. Any of them can also be None, 
     if they are not required.
@@ -336,13 +349,17 @@ def read_vs_cdr3s_epis_subs(datafile,va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b'
     cols=[]
     names = [va,vb,cdr3a,cdr3b,epis,subs]
     i_names = []
-    for i, name in zip(range(6), names):
+    for i, name in enumerate(names):
         if name is not None:
-            cols.append(fields.index(name))
-            i_names.append(i)
+            try:
+                cols.append(fields.index(name))
+                i_names.append(i)
+            except ValueError:
+                print('Check your header names (va, vb, cdr3a, cdr3b), \''+name+'\' was not found from the datafile.')
+                raise
         
     va_vb_3a_3b_ep_su =  [[] for i in range(6)]
-    lists = np.loadtxt(datafile,dtype=str,delimiter=delimiter,comments=None,unpack=True,skiprows=1,usecols=cols)
+    lists = np.loadtxt(datafile,dtype=str,delimiter=delimiter,comments=None,unpack=True,skiprows=1,usecols=cols,encoding=encoding)
     if len(cols)==1:
         va_vb_3a_3b_ep_su[i_names[0]]=lists
     else:
@@ -351,119 +368,161 @@ def read_vs_cdr3s_epis_subs(datafile,va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b'
     
     return va_vb_3a_3b_ep_su
 
-def get_sequence_lists(organism,datafile,cdr_types,delim,clip3,clip,
-                       va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope',subs='subjects'):
-    """Get epitopes, subjects, cdrs, and max lengths of cdrs. 
-    V-genes should contain all information necessary to get the requested cdr types."""
-    
-    cdrAtypes=cdr_types[0]
-    cdrBtypes=cdr_types[1]
-    [vas,vbs,cdr3as,cdr3bs,epis,subs] = read_vs_cdr3s_epis_subs(datafile,va,vb,cdr3a,cdr3b,epis,subs,delim)
-        
-    cdrs = create_cdr_dict(species=[organism])
-    seq_lists = []    
-    if 'cdr3' in cdrAtypes:
-        cdr3as = align_gap(cdr3as)
+def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None,va='va',vb='vb', cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope',subs='subject',check_v='none',balance_controls=True,encoding='bytes'):
+    """Get sequence lists of the requested cdr_types from datafile
+    organism: human/mouse
+    epi: epitope name in datafile (ignored if balance_controls=False)
+    cdrtypes: some subset of ['cdr1','cdr2','cdr25']
+    delimiter: delimiter used in datafile, e.g. ','
+    clip: [a,b] remove a AAs from beginning and b AAs from the end of the given cdr3s
+    lmax3: determines maximum length for CDR3s. Can be given separately for cdr3A and cdr3B. If None, maximum 
+           length of CDR3s in the data file is used.
+    va,vb,cdr3a,cdr3b,epis,subs: column names of VA-genes, VB-genes, CDR3A, CDR3B, epitopes, subjects. Can be None, if not required.
+    check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
+             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
+    balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
+    """
+    # Read data file and extract requested information
+    vas,vbs,cdr3as,cdr3bs,epitopes,subjects = read_vs_cdr3s_epis_subs(datafile,va=va,vb=vb,cdr3a=cdr3a,cdr3b=cdr3b, epis=epis,subs=subs,delimiter=delimiter,encoding=encoding)
+    if balance_controls:
+        Ie = epitopes == epi
+    if isinstance(lmax3,int):
+        lmax3=[lmax3,lmax3]
+    elif lmax3==None :
+        lmax3=[max_len(cdr3as),max_len(cdr3bs)]
+    elif lmax3[0]==None: 
+        lmax3[0]=max_len(cdr3as)
+    elif lmax3[1]==None: 
+        lmax3[1]=max_len(cdr3bs)
+    clip3=sum(clip)>0
+    # Get and check CDRs from epitope-specific TCRs
+    Itest = np.ones((max_len([epitopes,cdr3as,cdr3bs])),dtype=bool)
+    seq_lists = []
+    if 'cdr3' in cdr_types[0]:
+        cdr3as_letter,cdr3as, I = check_align_cdr3s(cdr3as,lmax3[0]) # I: which cdr3s will be kept
+        if balance_controls:
+            Itest[np.logical_and( Ie,~I)]=False
+            Itest[~Ie] = Itest[Ie]
+        else:
+            Itest[~I]=False
         if clip3:
             cdr3as = clip_cdr3s(cdr3as,clip)
         seq_lists.append(tcrs2nums(cdr3as))
-    
-    ics=[]
-    for i,c in zip(range(3),['cdr1','cdr2','cdr25']):
-        if c in cdrAtypes:
-            ics.append(i)
-            
-    if len(ics) > 0:
-        vas = [correct_vgene(v,'A') for v in vas]
-        css=[[],[],[]]
-        for v in vas:
-            cs = cdrs['human']['A'][v]
-            for i in ics:
-                css[i].append(cs[i])
-        for i in ics:
-            seq_lists.append(tcrs2nums(css[i]))
-
-    if 'cdr3' in cdrBtypes:
-        cdr3bs = align_gap(cdr3bs)
+        
+    if any([ c in ['cdr1','cdr2','cdr25'] for c in cdr_types[0]]):
+        cdrs = extract_cdrs_from_v(vas,organism,'A',cdr_types[0],correctVs=True,check_v=check_v)
+        for clist in cdrs:
+            if len(clist)>0:
+                cs, I = remove_starred(clist)
+                seq_lists.append(tcrs2nums(cs))
+                I=np.asarray([len(x)>0 for x in cs])
+                if balance_controls:
+                    Itest[np.logical_and( Ie,~I)]=False
+                    Itest[~Ie] = Itest[Ie]
+                else:
+                    Itest[~I]=False
+        
+    if 'cdr3' in cdr_types[1]:
+        _, cdr3bs, I = check_align_cdr3s(cdr3bs,lmax3[1])
+        if balance_controls:
+            Itest[np.logical_and( Ie,~I)]=False
+            Itest[~Ie] = Itest[Ie]
+        else:
+            Itest[~I]=False
         if clip3:
             cdr3bs = clip_cdr3s(cdr3bs,clip)
         seq_lists.append(tcrs2nums(cdr3bs))
-                    
-    ics=[]
-    for i,c in zip(range(3),['cdr1','cdr2','cdr25']):
-        if c in cdrBtypes:
-            ics.append(i)
-    if len(ics) > 0:
-        vbs = [correct_vgene(v,'B') for v in vbs]
-        css=[[],[],[]]
-        for v in vbs:
-            cs = cdrs['human']['B'][v]
-            for i in ics:
-                css[i].append(cs[i])
-        for i in ics:
-            seq_lists.append(tcrs2nums(css[i]))
-
-    lmaxes = []
-    for seqs in seq_lists:
-        lmaxes.append(len(seqs[0]))
         
-    return epis,subs,seq_lists,lmaxes
+    if any([ c in ['cdr1','cdr2','cdr25'] for c in cdr_types[1]]):
+        cdrs = extract_cdrs_from_v(vbs,organism,'B',cdr_types[1],correctVs=True,check_v=check_v)
+        for clist in cdrs:
+            if len(clist)>0:
+                cs, I = remove_starred(clist)
+                seq_lists.append(tcrs2nums(cs))
+                I=np.asarray([len(x)>0 for x in cs])
+                if balance_controls:
+                    Itest[np.logical_and( Ie,~I)]=False
+                    Itest[~Ie] = Itest[Ie]
+                else:
+                    Itest[~I]=False
+
+    assert (sum(Itest) >0), "Given data didn't contain any TCRs with the required information. You may try to use check_v='deduce' or train a model with only CDR3s."
+    ncdrs=len(seq_lists)
+    cdr_lists = [[] for i in range(ncdrs)]    
+    for ind in np.where(Itest)[0]:
+        for i in range(ncdrs):
+            cdr_lists[i].append(seq_lists[i][ind])
+    
+    lmaxes=[]
+    for i in range(ncdrs):
+        lmaxes.append(len(cdr_lists[i][0]))
+    
+    if len(subjects)>0:
+        subjects=np.asarray(subjects)[Itest]
+    if len(epitopes)>0:
+        epitopes=np.asarray(epitopes)[Itest]
+    
+    return epitopes, subjects, cdr_lists, lmaxes, Itest
 
 def get_subjects(organism,epi,epitopes,subjects,min_subjects=5, cv=5):
     """Get subject list for given epitope. Define new subjects if there are not enough.
     This function is primarily inteded to be used with loso"""
     I = epitopes==epi
     subjects_epi = subjects[I]
-    subjects_u = np.unique(subjects_epi)
-    
+    subjects_u = np.unique(subjects_epi)  
     l_epis = sum(I)
     n_subs = len(subjects_u)
         
-    print(organism+' '+epi+': '+str(n_subs)+ ' subjects, '+str(l_epis)+' samples')
+    print(organism+' '+epi+': '+str(n_subs)+ ' subjects, '+str(l_epis)+' positive and '+str(len(I))+' control samples')
 
     ind1 = 0
     if n_subs < min_subjects:
         print('Not enough subjects. Using ' +str(cv)+ '-fold cross-validation')
         subjects_u=list(range(1,cv+1))
         subjects_epi = np.asarray((subjects_u*int(np.ceil(l_epis/cv)))[:l_epis])    
-        l_s=cv
+        n_subs=cv
 
     return subjects_epi, l_epis, subjects_u, n_subs, I
 
-
 # Plotting
 
-def plot_aurocs_ths(y_list,p_list,epi='',thresholds=None,dpi=200):
+def plot_aurocs_ths(y_list,p_list,epi='',thresholds=None,dpi=200,figsize=(10,3)):
     """plot AUROCs"""
     if thresholds is None:
         thresholds=[0.0, 0.05, 0.1, 0.2]
     
-    f=plt.figure(figsize=(12,5),dpi=dpi)
-    plt.subplot(121)
-    
-    aucscores, samples = [], []
-    for i in range(len(y_list)):
-        y = y_list[i]
-        p = p_list[i]
-        aucscores.append(roc_auc(y,p))
-        samples.append(len(y))
-        fprs,tprs,_ = roc_curve(y,p,pos_label=1)  
-        plt.plot(np.concatenate([[0],fprs]),np.concatenate([[0],tprs]),linewidth=0.75)
-    
-    mean_auc    = np.mean(aucscores)
-    mean_wt_auc = np.sum(np.expand_dims(aucscores,1)*np.expand_dims(samples,1))/sum(samples)
-    
-    plt.xlim([-0.01,1.01])
-    plt.ylim([-0.01,1.01])
-    plt.axis('square')
-    plt.xlabel('FPRS')
-    plt.ylabel('TPRS')
-    plt.title(epi+ '\n mean AUC: {:1.4f}, mean weighted AUC: {:1.4f}'.format(mean_auc,mean_wt_auc))
+    f=plt.figure(figsize=figsize,dpi=dpi)
+    if type(y_list) is list:
+        plt.subplot(121)
 
-    plt.subplot(122)
-    
-    y_all=np.concatenate(y_list)
-    p_all=np.concatenate(p_list)
+        aucscores, samples = [], []
+        for i in range(len(y_list)):
+            y = y_list[i]
+            p = p_list[i]
+            aucscores.append(roc_auc(y,p))
+            samples.append(len(y))
+            fprs,tprs,_ = roc_curve(y,p,pos_label=1)  
+            plt.plot(np.concatenate([[0],fprs]),np.concatenate([[0],tprs]),linewidth=0.75)
+
+        mean_auc    = np.mean(aucscores)
+        mean_wt_auc = np.sum(np.expand_dims(aucscores,1)*np.expand_dims(samples,1))/sum(samples)
+
+        plt.xlim([-0.01,1.01])
+        plt.ylim([-0.01,1.01])
+        plt.axis('square')
+        plt.xlabel('FPRS')
+        plt.ylabel('TPRS')
+        plt.title(epi+ '\n mean AUC: {:1.4f}, mean weighted AUC: {:1.4f}'.format(mean_auc,mean_wt_auc))
+
+        plt.subplot(122)
+
+        y_all=np.concatenate(y_list)
+        p_all=np.concatenate(p_list)
+    else:
+        y_all = y_list
+        p_all = p_list
+        mean_auc=None
+        mean_wt_auc=None
     fprs,tprs,th = roc_curve(y_all,p_all,pos_label=1)
         
     l_auc, = plt.plot(fprs,tprs)
@@ -496,12 +555,13 @@ def plot_aurocs_ths(y_list,p_list,epi='',thresholds=None,dpi=200):
     plt.xticks(np.arange(0,1.01,0.1))
     plt.yticks(np.arange(0,1.01,0.1))
 
-    plt.title(epi+' AUROC: {:1.4f}'.format(roc_auc(y_all,p_all)))
+    auc_all=roc_auc(y_all,p_all)
+    plt.title(epi+' AUROC: {:1.4f}'.format(auc_all))
     plt.legend(handles=legs,labels=labels,loc=(1.1,0.6))   
 
     plt.show()
     
-    return mean_auc, mean_wt_auc
+    return mean_auc, mean_wt_auc, auc_all
 
 
 # Construct kernels, select inducing points, train and load models
@@ -543,8 +603,114 @@ def select_Z_mbs(nZ,mbs,XP_tr):
         mbs = int(np.ceil(mbs*n_tr))
     return Z, mbs
 
-def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=5000,lr=0.005,nZ=0,mbs=0,clip3=False,clip=[3,2],
-         min_subjects=5,cv=5,delim=',',va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',subs='subject',epis='epitope'):
+def print_model_info(model):
+    """Print information of the parameters of a model created with train_classifier-function"""
+    [cdr_types,lmaxes,lengthscales,variances,_,_,_,y,_,Z,mbs,clip]=model
+    print('CDR types: ',end='')
+    cdr_list=[]
+    for i,chain in enumerate(['a','b']):
+        for cdr in ['cdr3','cdr1','cdr2','cdr25']:
+            if cdr in cdr_types[i]:
+                print(cdr+chain, end=' ')
+                cdr_list.append(cdr+chain)
+    print('\nmax lengths: ',end='')
+    if 'cdr3' in cdr_types[0]:
+        print('cdr3a: {:d}'.format(model[1][0]), end=' ')
+    if 'cdr3' in cdr_types[1]:
+        print('cdr3b: {:d}'.format(model[1][len(cdr_types[0])]))
+    print('number of training samples: {:d} ({:d} positive, {:d} negative)'.format(len(y),np.sum(y),len(y)-np.sum(y)))
+    print('number of inducing points: {:d}'.format(len(model[9])))
+    if len(model[10])==0:
+        print('minibatch size: 0')
+    else:
+        print('minibatch size: {:d}'.format(model[10]))
+    print('lengthscales: ',end='')
+    for i,c in enumerate(cdr_list):
+        print('{:s}: {:.4f}'.format(c,lengthscales[i]),end=' ')
+    print('\nkernel variances: ',end='')
+    
+    for i,c in enumerate(cdr_list):
+        print('{:s}: {:.4f}'.format(c,variances[i]),end=' ')
+    print('\nclip cdr3s: {:d} from beginning, {:d} from end'.format(clip[0],clip[1]))
+                          
+def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0, m_iters=5000,lr=0.005,nZ=0,mbs=0, clip=[0,0],min_subjects=5,cv=5,delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs='subject',epis='epitope', check_v='none'):
+    """
+    Leave-on-subject-out cross-validation with TCRGP
+    datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
+        required to get the requsted cdr types, they may be empty.
+    organism: 'human' or 'mouse' 
+    epi: name of the epitope
+    pc: principal components or features for each amino acid.
+    cdr_types: CDRs utilized by the model. list that contains list of CDR types for chain A and chain B. 
+        possible CDR types are cdr1, cdr2, cdr25 and cdr3.
+        
+    l: initial length scale for kernel. Can also be a list where there is a separate lengthscale for each CDR
+        in the following order: cdr3a, cdr1a, cdr2a, cdr25a, cdr3b, cdr1b, cdr2b, cdr25b
+    var: initial variance (weight) for kernel. Same format as with l.
+    m_iters: maximum number of iterations
+    lr: learning rate
+    nZ: number of inducing points to be used with SVGP(selected with kmeans). If zero, VGP will be used.
+    mbs: minibatch size, in case SVGP is used.
+    clip: list, remove clip[0] amino acids from beginning and clip[1] amino acids from the end
+    min_subjects: minimum number of subjects required for loso-cv. If there are less subjects, 
+        do cv-fold cross-validation instead.
+    cv: how many fold cross-cross validation in case loso is not possible.
+    va,vb,cdr3a,cdr3b,sub,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
+        subjects, and epitopes. Any of them can be None, if they are not required to get the requested cdr_types 
+    check_v: if 'none', no checking is done, if the v-gene is incomplete (e.g. no allele is given), the function will fail. 
+            If 'ignore', TCRs with incomplete V-genes are ignored. If 'deduce' all TCRs with V-genes from which the 
+            requested CDRs (CDR1, CDR2, CDR2.5) can be deduced from, are utilized, and other TCRs are ignored.
+    returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds and plots the AUROCs.
+    """
+    
+    # Read data file and extract requested CDRs
+    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None,va,vb, cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=True)       
+
+    # encode with pc components
+    d = pc.shape[0]
+    X = encode_with_pc(cdr_lists,lmaxes,pc)
+    
+    # Handle subject list that determins the training folds.
+    subjects_epi, l_epi, subjects_u, n_subs, Ipos = get_subjects(organism,epi,epitopes,subjects,min_subjects,cv)
+    
+    Ineg = ~Ipos
+    y = np.zeros((len(epitopes),1), dtype=int)
+    y[Ipos] = 1
+      
+    y_list, p_list = [], []
+    i=1
+    for subject in subjects_u:
+        
+        Isub = np.ones((l_epi),dtype=bool)
+        Isub[subjects_epi==subject] = False
+        
+        I = np.ones((2*l_epi),dtype=bool)
+        I[Ipos]= Isub
+        I[Ineg]= Isub
+        
+        with tf.Session(graph=tf.Graph()):
+            kernel = construct_rbf_kernel(d,lmaxes)
+            if nZ == 0: # use VGP
+                m = gpflow.models.VGP(X[I,:],y[I],kernel,gpflow.likelihoods.Bernoulli())
+            else: # use SVGP
+                # inducing locations by kmeans
+                Z, mbs = select_Z_mbs(nZ,mbs,X[I,:])
+                m = gpflow.models.SVGP(X[I,:],y[I],kernel,gpflow.likelihoods.Bernoulli(),Z=Z,minibatch_size=mbs)
+            m.likelihood.variance = 1.0
+
+            print('\rComputing fold: {:d}/{:d}'.format(i,n_subs),end='')
+            i+=1
+            gpflow.train.AdamOptimizer(lr).minimize(m, maxiter=m_iters)
+            p, _ = m.predict_y(X[~I,:])
+
+        y_list.append(y[~I])
+        p_list.append(p)
+    print('\rAll folds ({:d}) computed.  '.format(n_subs))
+    
+    mean_auc, mean_wt_auc, auc_all = plot_aurocs_ths(y_list,p_list,epi)
+    return [mean_auc, mean_wt_auc, y_list, p_list]
+
+def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=5000,lr=0.005,nZ=0,mbs=0,clip=[0,0],delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs='subject',epis='epitope',check_v='none',balance_controls=True):
     """
     Leave-on-subject-out cross-validation with TCRGP
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
@@ -569,31 +735,35 @@ def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=
     cv: how many fold cross-cross validation in case loso is not possible.
     va,vb,cdr3a,cdr3b,sub,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
         subjects, and epitopes. Any of them can be None, if they are not required to get the requested cdr_types 
+    check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
+             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
+    balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
     returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds
     """
     
     # Read data file and extract requested CDRs
-    epitopes,subjects,cdr_lists,lmaxes = get_sequence_lists(organism,datafile,cdr_types,delim,clip3,clip,va,vb,cdr3a,cdr3b,epis,subs)
+    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None, va,vb,cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=True)
 
     # encode with pc components
     d = pc.shape[0]
     X = encode_with_pc(cdr_lists,lmaxes,pc)
+    n = len(epitopes)
     
-    # Handle subject list that determins the training folds.
-    subjects_epi, l_epi, subjects_u, n_subs, Ipos = get_subjects(organism,epi,epitopes,subjects,min_subjects,cv)
-    
+    Ipos = epitopes==epi
+    l_epi = sum(Ipos)
+ 
+    print(str(l_epi)+' positive samples')
+    inds_pos=np.nonzero(Ipos)[0]
     Ineg = ~Ipos
-    y = np.zeros((len(epitopes),1), dtype=int)
+    y = np.zeros((n,1), dtype=int)
     y[Ipos] = 1
       
-    y_list, p_list = [], []
-    for subject in subjects_u:
-        Isub = np.ones((l_epi),dtype=bool)
-        Isub[subjects_epi==subject] = False
+    ps = np.zeros((n,1),dtype=float)
+    i=1
+    for ind in range(n):
         
-        I = np.ones((2*l_epi),dtype=bool)
-        I[Ipos]= Isub
-        I[Ineg]= Isub
+        I = np.ones((n,),dtype=bool)
+        I[ind]= False
         
         with tf.Session(graph=tf.Graph()):
             kernel = construct_rbf_kernel(d,lmaxes)
@@ -605,17 +775,20 @@ def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=
                 m = gpflow.models.SVGP(X[I,:],y[I],kernel,gpflow.likelihoods.Bernoulli(),Z=Z,minibatch_size=mbs)
             m.likelihood.variance = 1.0
 
+            print('\rComputing fold: {:d}/{:d}'.format(i,n),end='')
+            i+=1
+            
             gpflow.train.AdamOptimizer(lr).minimize(m, maxiter=m_iters)
             p, _ = m.predict_y(X[~I,:])
 
-        y_list.append(y[~I])
-        p_list.append(p)
+        ps[ind]=p
     
-    mean_auc, mean_wt_auc = plot_aurocs_ths(y_list,p_list,epi)
-    return [mean_auc, mean_wt_auc, y_list, p_list]
+    print('\rAll folds ({:d}) computed.  '.format(n))
+    _, _, auc_all = plot_aurocs_ths(y,ps,epi,dpi=150)
+    return [auc_all, y, ps]
 
-def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=5000,lr=0.005,nZ=0,mbs=0,l3_max=0,
-                     clip3=False,clip=[3,2],delimiter=',',va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope'):
+
+def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=5000,lr=0.005,nZ=0,mbs=0,lmax3=None, clip=[0,0],delimiter=',',va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope', check_v='none',balance_controls=True):
     """
     Train classifier with TCRGP. Returns training AUC and parameters required for the rebuilding of the model.
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
@@ -637,21 +810,24 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=50
     clip: list, remove clip[0] amino acids from beginning and clip[1] amino acids from the end
     delimiter: delimiter used in datafile
     va,vb,cdr3a,cdr3b,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
-        and epitopes. Any of them can be None, if they are not required to get the requested cdr_types 
+        and epitopes. Any of them can be None, if they are not required to get the requested cdr_types
+    check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
+             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
+    balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
     returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds
     """
      
     # Read data file and extract requested CDRs
-    epitopes,_,cdr_lists,lmaxes = get_sequence_lists(organism,datafile,cdr_types,delimiter,clip3,clip,va,vb,cdr3a,cdr3b,epis,subs=None)
-    
-    # encode with pc components
-    d = pc.shape[0]
-    X = encode_with_pc(cdr_lists,lmaxes,pc)
+    epitopes,_,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3,va,vb,cdr3a,cdr3b,epis,subs=None,check_v=check_v,balance_controls=balance_controls)
     
     # Class labels
     y = np.zeros((len(epitopes),1),dtype=int)
     y[epitopes==epi] = 1
-    assert any(y),"epi did not occur in the training data. There we no positive samples."
+    assert any(y),"Given epitope did not occur in the training data. There we no positive samples."
+    
+    # encode with pc components
+    d = pc.shape[0]
+    X = encode_with_pc(cdr_lists,lmaxes,pc)
 
     with tf.Session(graph=tf.Graph()):
         kernel = construct_rbf_kernel(d,lmaxes)
@@ -675,81 +851,49 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=50
             vs.append(m.kern.variance.value)
 
         param_list = [cdr_types,lmaxes,ls, vs, m.q_mu.value, m.q_sqrt.value, pc, y, X]
-
         if nZ>0:
-            param_list.append(m.Z.value)
+            param_list.append(m.feature.Z.value)
             param_list.append(mbs)
         else:
             param_list.append([])
             param_list.append([])
-            
+        param_list.append(clip)
+        
         p, _ = m.predict_y(X)
     
     auc = roc_auc(y,p) # Training AUC
     return auc, param_list
 
-def predict(filename, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b='cdr3b',delimiter=','):
+def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b='cdr3b',delimiter=',',encoding='bytes',check_v='none'):
     """Do predictions for the TCRs in the given file. 
     Predictions are returned in the same order as the TCRs in the file.
-    filename: name of the file containing the TCRs for testing
+    datafile: name of the file containing the TCRs for testing
     params: parameters needed to rebuild the classification model. 
         This is can be obtained from the train_classifier-function
-    cdr_types    
-        """
-   
+    va,vb,cdr3a,cdr3b,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
+        and epitopes. Any of them can be None, if they are not required to get the requested cdr_types
+    delimiter: delimiter used in datafile
+    check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
+             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
+    Returns predictions in the same order as the TCRs appear in datafile (nan for TCRs for which no prediction could be made).
+    """
     # Extract parameters
-    [cdr_types,lmaxes,lengthscales,variances,q_mu,q_sqrt,pc,y_train,X,Z,mbs]=params
-    cdrAtypes=cdr_types[0]
-    cdrBtypes=cdr_types[1]
+    [cdr_types,lmaxes,lengthscales,variances,q_mu,q_sqrt,pc,y_train,X,Z,mbs,clip]=params
     d = int(X.shape[1]/sum(lmaxes))
     if len(Z)>0:
         is_sparse = True
     else:
         is_sparse = False
-
-    [vas,vbs,cdr3as,cdr3bs,_,_] = read_vs_cdr3s_epis_subs(filename,va,vb,cdr3a,cdr3b,None,None,delimiter=delimiter)
-    nseqs = max_len([vas,vbs,cdr3as,cdr3bs])
     
-    Itest = np.ones((nseqs,),dtype=bool)
-    seq_lists_letter = []
-    seq_lists = []
-    if 'cdr3' in cdrAtypes:
-        cdr3as_letter,cdr3as, I = check_align_cdr3s(cdr3as,lmaxes[0])
-        Itest = np.logical_and(Itest,I)
-        seq_lists_letter.append(cdr3as_letter)
-        seq_lists.append(tcrs2nums(cdr3as))
-        
-    if any([ c in ['cdr1','cdr2','cdr25'] for c in cdrAtypes]):
-        cdrs = extract_cdrs_minimal_v(vas, organism, 'A', cdrAtypes, correctVs=True)
-        for clist in cdrs:
-            if len(clist)>0:
-                seq_lists_letter.append(clist)
-                cs, I = remove_starred_(clist)
-                Itest = np.logical_and(Itest, I)
-                seq_lists.append(tcrs2nums(cs))
-        
-    if 'cdr3' in cdrBtypes:
-        cdr3bs_letter, cdr3bs, I = check_align_cdr3s(cdr3bs,lmaxes[len(cdrAtypes)])
-        Itest = np.logical_and(Itest, I)
-        seq_lists_letter.append(cdr3bs_letter)
-        seq_lists.append(tcrs2nums(cdr3bs))
-        
-    if any([ c in ['cdr1','cdr2','cdr25'] for c in cdrBtypes]):
-        cdrs = extract_cdrs_minimal_v(vbs, organism, 'B', cdrBtypes, correctVs=True)
-        for clist in cdrs:
-            if len(clist)>0:
-                seq_lists_letter.append(clist)
-                cs, I = remove_starred(clist)
-                Itest = np.logical_and(Itest, I)
-                seq_lists.append(tcrs2nums(cs))
-          
-    ncdrs=len(seq_lists)
-    seq_lists_test = [[] for i in range(ncdrs)] 
-    for ind in np.where(Itest)[0]:
-        for i in range(ncdrs):
-            seq_lists_test[i].append(seq_lists[i][ind])
-     
-    X_test = encode_with_pc(seq_lists_test,lmaxes,pc) 
+    i=0
+    if 'cdr3' in cdr_types[0] and 'cdr3' in cdr_types[1]:
+        i+=1
+    lmax3=[lmaxes[0],lmaxes[i]]
+    
+    # Read data file and extract requested CDRs
+    _,_,cdr_lists,lmaxes,Itest = get_sequence_lists(datafile,organism,None,cdr_types,delimiter,clip,lmax3,va,vb,cdr3a,cdr3b,epis=None,subs=None,check_v=check_v,balance_controls=False,encoding=encoding) 
+                
+    X_test = encode_with_pc(cdr_lists,lmaxes,pc) 
     predictions = np.nan*np.ones((len(Itest),1))
     
     # Do predictions for valid sequences
@@ -766,5 +910,6 @@ def predict(filename, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b=
            
         p, _ = m.predict_y(X_test)
         predictions[Itest] = p
-        
-    return seq_lists_letter, predictions
+    
+    # return sequence lists and predictions in original order
+    return predictions

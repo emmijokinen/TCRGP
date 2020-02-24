@@ -294,7 +294,11 @@ def extract_cdrs_from_v(vgenes, organism, chain, cdrtypes,correctVs=True,check_v
     cdrtypes: some subset of ['cdr1','cdr2','cdr25']
     correctVs: If True, attempt to chage V-genes in correct format
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
-             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails."""
+             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
+    
+    Returns lists of CDRs ([CDR1s, CDR2s, CDR2.5s]) determined from the V-genes. If CDRs for a V-gene 
+        could not be obtained, the corresponding location is left empty.
+    """
     if correctVs:
         vgenes=[correct_vgene(v,chain) for v in vgenes]
     
@@ -339,7 +343,8 @@ def read_vs_cdr3s_epis_subs(datafile,va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b'
     """Reads VA-genes, VB-genes, CDR3As, CDR3Bs from the given data file. 
     The columns are determined by va, vb, cdr3a, and cdr3b. Any of them can also be None, 
     if they are not required.
-    returns a list of lists [vas, vbs, cdr3as, cdr3bs, epis, subs]. If a specifier was None, 
+    
+    Returns a list of lists [vas, vbs, cdr3as, cdr3bs, epis, subs]. If a specifier was None, 
     the corresponding list is empty."""
     
     with open(datafile, newline='') as csvfile:
@@ -381,6 +386,8 @@ def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
     balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
+    
+    Returns epitopes, subjects, cdr_lists, lmaxes, Itest (which indicates which of the given TCRs were returned)
     """
     # Read data file and extract requested information
     vas,vbs,cdr3as,cdr3bs,epitopes,subjects = read_vs_cdr3s_epis_subs(datafile,va=va,vb=vb,cdr3a=cdr3a,cdr3b=cdr3b, epis=epis,subs=subs,delimiter=delimiter,encoding=encoding)
@@ -466,14 +473,14 @@ def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None
 
 def get_subjects(organism,epi,epitopes,subjects,min_subjects=5, cv=5):
     """Get subject list for given epitope. Define new subjects if there are not enough.
-    This function is primarily inteded to be used with loso"""
+    This function is primarily inteded to be used from within loso"""
     I = epitopes==epi
     subjects_epi = subjects[I]
     subjects_u = np.unique(subjects_epi)  
     l_epis = sum(I)
     n_subs = len(subjects_u)
         
-    print(organism+' '+epi+': '+str(n_subs)+ ' subjects, '+str(l_epis)+' positive and '+str(len(I))+' control samples')
+    print(organism+' '+epi+': '+str(n_subs)+ ' subjects, '+str(l_epis)+' positive and '+str(sum(~I))+' control samples')
 
     ind1 = 0
     if n_subs < min_subjects:
@@ -484,12 +491,47 @@ def get_subjects(organism,epi,epitopes,subjects,min_subjects=5, cv=5):
 
     return subjects_epi, l_epis, subjects_u, n_subs, I
 
+def get_stratified_folds(y,k=200):
+    """
+    y: numpy array of size (n,1), consists of zeros and ones (ones for positive samples)
+    k: number of folds
+    Returns inds: indices for k folds.
+    """
+    y=y.copy()
+    npos = np.sum(y)
+    nneg = len(y)-npos
+    inds = np.zeros((len(y),),dtype=int)
+    for i in range(k):
+        n_p = int(npos/(k-i))
+        n_n = int(nneg/(k-i))
+ 
+        ii = np.where(y==1)[0]
+        I=np.random.choice(ii,n_p,replace=False)
+        inds[I]=i
+        y[I]=2
+        
+        ii = np.where(y==0)[0]
+        I = np.random.choice(ii,n_n,replace=False)
+        inds[I]=i
+        y[I]=2
+        
+        npos -= n_p
+        nneg -= n_n
+        
+    return inds 
+
+
 # Plotting
 
-def plot_aurocs_ths(y_list,p_list,epi='',thresholds=None,dpi=200,figsize=(10,3)):
-    """plot AUROCs"""
-    if thresholds is None:
-        thresholds=[0.0, 0.05, 0.1, 0.2]
+def plot_aurocs_ths(y_list,p_list,epi='',thresholds=[0.0, 0.05, 0.1, 0.2],dpi=200,figsize=(10,3)):
+    """plot AUROC and threshold values
+    y_list: list of arrays or array of class labels (1,0). If list of arrays, different ROC is plotted for each array.
+    p_list: list of arrays or array of predictions.
+    epi: name of the epitope or other string to be added in the beginning of the figure title.
+    thresholds: False positive rates for which prediction thresholds will be shown.
+    
+    Returns mean AUROC, mean weighted AUROC and AUROC across all folds, in addition to producing the figure.
+    """
     
     f=plt.figure(figsize=figsize,dpi=dpi)
     if type(y_list) is list:
@@ -568,7 +610,15 @@ def plot_aurocs_ths(y_list,p_list,epi='',thresholds=None,dpi=200,figsize=(10,3))
 
 def construct_rbf_kernel(d,lmaxes,lengthscales=[1.0],kernvaris=[1.0]):
     """Contsructs a kernel as as sum of GPFlow RBF-kernels with given lengthscales and variances.
-    d is the number of features used, and lmaxes is a list of the lengths of the CDRs used."""
+    d: number of features used
+    lmaxes: list of the lengths of the CDRs used.
+    lengthscales: list of (initial) lengthscales for RBF-kernels for each CDR in the following order: cdr3a, cdr1a, cdr2a, cdr25a, 
+        cdr3b, cdr1b, cdr2b, cdr25b. If len(lengthscales)==1, but many CDRs are used, the same lengthscale 
+        is used for each of them 
+    kernvaris: list of (initial) kernel variances. Same format as with lengthscales 
+    
+    Returns the constructed kernel
+    """
     l = len(lmaxes)
     i_start=0
     Di=d*lmaxes[0]
@@ -589,10 +639,13 @@ def construct_rbf_kernel(d,lmaxes,lengthscales=[1.0],kernvaris=[1.0]):
     return kernel
 
 def select_Z_mbs(nZ,mbs,XP_tr):
-    """Select inducing point locations with kmeans from training data XP_tr, and  minibatch size.
+    """Select inducing point locations with kmeans from training data XP_tr, and minibatch size mbs.
     n_tr = number of training points.
     If nZ<1, there will be nZ * n_tr inducing points. Otherwise there will be nZ training points. 
-    Same applies for the minibatch size mbs, except that if mbs=0 or mbs > n_tr, mbs is set to n_tr"""  
+    Same applies for the minibatch size mbs, except that if mbs=0 or mbs > n_tr, mbs is set to n_tr
+    
+    Returns inducing points and minibatch size
+    """  
     n_tr = XP_tr.shape[0]
     if nZ < 1:
         nZ = int(np.ceil(nZ*n_tr))
@@ -633,7 +686,7 @@ def print_model_info(model):
         print('{:s}: {:.4f}'.format(c,variances[i]),end=' ')
     print('\nclip cdr3s: {:d} from beginning, {:d} from end'.format(clip[0],clip[1]))
                           
-def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0, m_iters=5000,lr=0.005,nZ=0,mbs=0, clip=[0,0],min_subjects=5,cv=5,delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs='subject',epis='epitope', check_v='none'):
+def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0], m_iters=5000,lr=0.005,nZ=0,mbs=0, clip=[0,0],min_subjects=5,cv=5,delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs='subject',epis='epitope', check_v='none'):
     """
     Leave-on-subject-out cross-validation with TCRGP
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
@@ -642,25 +695,27 @@ def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0, m_iters
     epi: name of the epitope
     pc: principal components or features for each amino acid.
     cdr_types: CDRs utilized by the model. list that contains list of CDR types for chain A and chain B. 
-        possible CDR types are cdr1, cdr2, cdr25 and cdr3.
-        
-    l: initial length scale for kernel. Can also be a list where there is a separate lengthscale for each CDR
-        in the following order: cdr3a, cdr1a, cdr2a, cdr25a, cdr3b, cdr1b, cdr2b, cdr25b
-    var: initial variance (weight) for kernel. Same format as with l.
+        possible CDR types are cdr1, cdr2, cdr25 and cdr3.    
+    l: list of initial lengthscales for RBF-kernels for each CDR in the following order: cdr3a, cdr1a, cdr2a, cdr25a, 
+        cdr3b, cdr1b, cdr2b, cdr25b. If len(l)==1, but many CDRs are used, the same lengthscale 
+        is used for each of them 
+    var: list of initial kernel variances (weights). Same format as with l.
     m_iters: maximum number of iterations
-    lr: learning rate
+    lr: learning rate for Adam optimizer
     nZ: number of inducing points to be used with SVGP(selected with kmeans). If zero, VGP will be used.
     mbs: minibatch size, in case SVGP is used.
-    clip: list, remove clip[0] amino acids from beginning and clip[1] amino acids from the end
+    clip: list, remove clip[0] amino acids from the beginnings and clip[1] amino acids from the ends of CDR3s
     min_subjects: minimum number of subjects required for loso-cv. If there are less subjects, 
         do cv-fold cross-validation instead.
     cv: how many fold cross-cross validation in case loso is not possible.
+    delim: delimiter used in datafile
     va,vb,cdr3a,cdr3b,sub,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
         subjects, and epitopes. Any of them can be None, if they are not required to get the requested cdr_types 
     check_v: if 'none', no checking is done, if the v-gene is incomplete (e.g. no allele is given), the function will fail. 
             If 'ignore', TCRs with incomplete V-genes are ignored. If 'deduce' all TCRs with V-genes from which the 
             requested CDRs (CDR1, CDR2, CDR2.5) can be deduced from, are utilized, and other TCRs are ignored.
-    returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds and plots the AUROCs.
+    
+    Returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds and plots the AUROCs.
     """
     
     # Read data file and extract requested CDRs
@@ -689,7 +744,7 @@ def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0, m_iters
         I[Ineg]= Isub
         
         with tf.Session(graph=tf.Graph()):
-            kernel = construct_rbf_kernel(d,lmaxes)
+            kernel = construct_rbf_kernel(d,lmaxes,l,var)
             if nZ == 0: # use VGP
                 m = gpflow.models.VGP(X[I,:],y[I],kernel,gpflow.likelihoods.Bernoulli())
             else: # use SVGP
@@ -710,9 +765,9 @@ def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0, m_iters
     mean_auc, mean_wt_auc, auc_all = plot_aurocs_ths(y_list,p_list,epi)
     return [mean_auc, mean_wt_auc, y_list, p_list]
 
-def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=5000,lr=0.005,nZ=0,mbs=0,clip=[0,0],delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs='subject',epis='epitope',check_v='none',balance_controls=True):
+def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],m_iters=5000,lr=0.005,nZ=0,mbs=0,clip=[0,0],delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs=None,epis='epitope',check_v='none',balance_controls=True):
     """
-    Leave-on-subject-out cross-validation with TCRGP
+    Leave-on-out cross-validation with TCRGP
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
         required to get the requsted cdr types, they may be empty.
     organism: 'human' or 'mouse' 
@@ -720,29 +775,27 @@ def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=5
     pc: principal components or features for each amino acid.
     cdr_types: CDRs utilized by the model. list that contains list of CDR types for chain A and chain B. 
         possible CDR types are cdr1, cdr2, cdr25 and cdr3.
-        
-    l: initial length scale for kernel. Can also be a list where there is a separate lengthscale for each CDR
-        in the following order: cdr3a, cdr1a, cdr2a, cdr25a, cdr3b, cdr1b, cdr2b, cdr25b
-    var: initial variance (weight) for kernel. Same format as with l.
+    l: list of initial lengthscales for RBF-kernels for each CDR in the following order: cdr3a, cdr1a, cdr2a, cdr25a, 
+        cdr3b, cdr1b, cdr2b, cdr25b. If len(l)==1, but many CDRs are used, the same lengthscale 
+        is used for each of them 
+    var: list of initial kernel variances (weights). Same format as with l.
     m_iters: maximum number of iterations
-    lr: learning rate
+    lr: learning rate for Adam optimizer
     nZ: number of inducing points to be used with SVGP(selected with kmeans). If zero, VGP will be used.
     mbs: minibatch size, in case SVGP is used.
-    clip3: bool, if True, clip amino acids from CDR3s as specified by clip
     clip: list, remove clip[0] amino acids from beginning and clip[1] amino acids from the end
-    min_subjects: minimum number of subjects required for loso-cv. If there are less subjects, 
-        do cv-fold cross-validation instead.
-    cv: how many fold cross-cross validation in case loso is not possible.
-    va,vb,cdr3a,cdr3b,sub,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
+    delim: delimiter used in datafile
+    va,vb,cdr3a,cdr3b,subs,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
         subjects, and epitopes. Any of them can be None, if they are not required to get the requested cdr_types 
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
     balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
-    returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds
+    
+    Returns AUROC, list of classes, and list of predictions
     """
     
     # Read data file and extract requested CDRs
-    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None, va,vb,cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=True)
+    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None, va,vb,cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=balance_controls)
 
     # encode with pc components
     d = pc.shape[0]
@@ -753,7 +806,6 @@ def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=5
     l_epi = sum(Ipos)
  
     print(str(l_epi)+' positive samples')
-    inds_pos=np.nonzero(Ipos)[0]
     Ineg = ~Ipos
     y = np.zeros((n,1), dtype=int)
     y[Ipos] = 1
@@ -766,7 +818,7 @@ def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=5
         I[ind]= False
         
         with tf.Session(graph=tf.Graph()):
-            kernel = construct_rbf_kernel(d,lmaxes)
+            kernel = construct_rbf_kernel(d,lmaxes,l,var)
             if nZ == 0: # use VGP
                 m = gpflow.models.VGP(X[I,:],y[I],kernel,gpflow.likelihoods.Bernoulli())
             else: # use SVGP
@@ -787,6 +839,88 @@ def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=1.0,var=1.0,m_iters=5
     _, _, auc_all = plot_aurocs_ths(y,ps,epi,dpi=150)
     return [auc_all, y, ps]
 
+def kfold_stratified(datafile,organism,epi,pc,k=200,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],m_iters=5000,lr=0.005,nZ=0,mbs=0,clip=[0,0],delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs=None,epis='epitope',check_v='none',balance_controls=False, balance_tr_controls=True):
+    """
+    Stratified k-fold cross-validation with TCRGP
+    datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
+        required to get the requsted cdr types, they may be empty.
+    organism: 'human' or 'mouse' 
+    epi: name of the epitope
+    pc: principal components or features for each amino acid.
+    k: number of folds
+    cdr_types: CDRs utilized by the model. list that contains list of CDR types for chain A and chain B. 
+        possible CDR types are cdr1, cdr2, cdr25 and cdr3.
+    l: list of initial lengthscales for RBF-kernels for each CDR in the following order: cdr3a, cdr1a, cdr2a, cdr25a, 
+        cdr3b, cdr1b, cdr2b, cdr25b. If len(l)==1, but many CDRs are used, the same lengthscale 
+        is used for each of them 
+    var: list of initial kernel variances (weights). Same format as with l.    
+    m_iters: maximum number of iterations
+    lr: learning rate for Adam optimizer
+    nZ: number of inducing points to be used with SVGP(selected with kmeans). If zero, VGP will be used.
+    mbs: minibatch size, in case SVGP is used.
+    clip: list, remove clip[0] amino acids from beginning and clip[1] amino acids from the end
+    delim: delimiter used in datafile
+    va,vb,cdr3a,cdr3b,sub,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
+        subjects, and epitopes. Any of them can be None, if they are not required to get the requested cdr_types 
+    check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
+             if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
+    balance_controls: get same amount of positive and negative TCRs
+    balance_tr_controls: use same amount of positive and negative TCRs (even if there are more negative TCRs for testing)
+    
+    Returns classes, fold indices, and predictions for the TCRs in the datafile.
+    """
+    
+    # Read data file and extract requested CDRs
+    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None, va,vb,cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=balance_controls)
+
+    # encode with pc components
+    d = pc.shape[0]
+    X = encode_with_pc(cdr_lists,lmaxes,pc)
+    n = len(epitopes)
+    
+    Ipos = epitopes==epi
+    l_epi = sum(Ipos)
+ 
+    print(str(l_epi)+' positive and '+str(sum(~Ipos))+' negative samples')
+    inds_pos=np.nonzero(Ipos)[0]
+    Ineg = ~Ipos
+    y = np.zeros((n,1), dtype=int)
+    y[Ipos] = 1
+    
+    inds= get_stratified_folds(y,k=k)
+    ps = np.ones((n,1),dtype=float)*np.nan
+
+    for ind in range(k):
+        
+        Itest = np.zeros((n,),dtype=bool)
+        Itest[inds==ind]= True
+        Itrain = ~Itest
+        if balance_tr_controls:
+            # only use subset of negative (number of epitope-specific TCRs)
+            Itrain[np.random.choice(np.where(Itrain & ~Ipos)[0],sum(Itrain[~Ipos])-sum(Itrain[Ipos]),replace=False)] = False
+        
+        with tf.Session(graph=tf.Graph()):
+            kernel = construct_rbf_kernel(d,lmaxes,l,var)
+            if nZ == 0: # use VGP
+                m = gpflow.models.VGP(X[Itrain,:],y[Itrain],kernel,gpflow.likelihoods.Bernoulli())
+            else: # use SVGP
+                # inducing locations by kmeans
+                Z, mbs = select_Z_mbs(nZ,mbs,X[Itrain,:])
+                m = gpflow.models.SVGP(X[Itrain,:],y[Itrain],kernel,gpflow.likelihoods.Bernoulli(),Z=Z,minibatch_size=mbs)
+            m.likelihood.variance = 1.0
+            
+            print('\rComputing fold: {:d}/{:d}'.format(ind+1,k),end='')
+            
+            gpflow.train.AdamOptimizer(lr).minimize(m, maxiter=m_iters)
+            p, _ = m.predict_y(X[Itest,:])
+
+        ps[Itest]=p
+        
+    print('\rAll folds ({:d}) computed.  '.format(k))
+    _, _, auc_all = plot_aurocs_ths(y,ps,epi,dpi=150)
+    
+    return y, inds, ps
+
 
 def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=5000,lr=0.005,nZ=0,mbs=0,lmax3=None, clip=[0,0],delimiter=',',va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope', check_v='none',balance_controls=True):
     """
@@ -797,16 +931,15 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=50
     epi: name of the epitope
     pc: principal components or features for each amino acid.
     cdr_types: CDRs utilized by the model. list that contains list of CDR types for chain A and chain B. 
-        possible CDR types are cdr1, cdr2, cdr25 and cdr3.
-        
+        possible CDR types are cdr1, cdr2, cdr25 and cdr3. 
     l: initial length scale for kernel. Can also be a list where there is a separate lengthscale for each CDR
         in the following order: cdr3a, cdr1a, cdr2a, cdr25a, cdr3b, cdr1b, cdr2b, cdr25b
     var: initial variance (weight) for kernel. Same format as with l.
     m_iters: maximum number of iterations
-    lr: learning rate
+    lr: learning rate for Adam optimizer
     nZ: number of inducing points to be used with SVGP(selected with kmeans). If zero, VGP will be used.
     mbs: minibatch size, in case SVGP is used.
-    clip3: bool, if True, clip amino acids from CDR3s as specified by clip
+    lmax3: maximum length for CDR3s. If None, this is determined by the longest CDR3 in the datafile.
     clip: list, remove clip[0] amino acids from beginning and clip[1] amino acids from the end
     delimiter: delimiter used in datafile
     va,vb,cdr3a,cdr3b,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
@@ -814,7 +947,8 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=50
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
     balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
-    returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds
+    
+    Returns AUROC (for the training data) and parameters of the trained model
     """
      
     # Read data file and extract requested CDRs
@@ -830,7 +964,7 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=50
     X = encode_with_pc(cdr_lists,lmaxes,pc)
 
     with tf.Session(graph=tf.Graph()):
-        kernel = construct_rbf_kernel(d,lmaxes)
+        kernel = construct_rbf_kernel(d,lmaxes,l,var)
         if nZ == 0:
             m = gpflow.models.VGP(X,y,kernel,gpflow.likelihoods.Bernoulli())
         else:
@@ -864,17 +998,20 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=50
     auc = roc_auc(y,p) # Training AUC
     return auc, param_list
 
-def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b='cdr3b',delimiter=',',encoding='bytes',check_v='none'):
+def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b='cdr3b', delimiter=',',encoding='bytes',check_v='none'):
     """Do predictions for the TCRs in the given file. 
     Predictions are returned in the same order as the TCRs in the file.
     datafile: name of the file containing the TCRs for testing
     params: parameters needed to rebuild the classification model. 
         This is can be obtained from the train_classifier-function
-    va,vb,cdr3a,cdr3b,epis: names for the columns that contain information for VA-genes, VB-genes, CDR3As, CDR3Bs,
-        and epitopes. Any of them can be None, if they are not required to get the requested cdr_types
+    organism: human or mouse
+    va,vb,cdr3a,cdr3b: names for the columns that contain information for VA-genes, VB-genes, CDR3As, and CDR3Bs.
+        Any of them can be None, if they are not required to get the requested cdr_types
     delimiter: delimiter used in datafile
+    encoding: encoding used in data file.
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
+    
     Returns predictions in the same order as the TCRs appear in datafile (nan for TCRs for which no prediction could be made).
     """
     # Extract parameters
@@ -913,3 +1050,51 @@ def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b=
     
     # return sequence lists and predictions in original order
     return predictions
+
+# Diversity computations
+
+def diversity_K(K,mintcrs=2):
+    """
+    Diversity of TCRs whose covariance matrix K is.
+    Nan is returned if there are less than mintcrs TCRs.
+    """
+    n = K.shape[0]
+    if n < mintcrs:
+        return np.nan
+    div = ( sum(K[np.triu_indices(n,1)])/(0.5*(n-1)*n) )**(-1)
+    return div
+
+def diversity_K2(K,mintcrs=2):
+    """
+    Diversity between TCRs on (n) rows and (m) columns, whose covariance matrix K (size n*m) is. (e.g. between two subjects)
+    Nan is returned if n or m is smaller than mintcrs.
+    """
+    n1,n2 = K.shape
+    if n1 < mintcrs and n2 < mintcrs:
+        return np.nan
+    N=n1*n2 # number of comparisons
+    ksum=np.sum(K)
+    div = ( ksum/N )**(-1)
+    return div
+
+def diversity_Kmany(K,Isubs,mintcrs=2):
+    """
+    Diversity of TCRs between subjects (determined by Isubs), whose covariance matrix K is.
+    Nan is returned if there are less than mintcrs TCRs.
+    """
+    n = K.shape[0]
+    if n < mintcrs:
+        return np.nan
+    kvals=[]
+    usubs=np.unique(Isubs)
+    N=0 # number of comparisons
+    ksum=0
+    for i in range(len(usubs)-1):
+        for j in range(i,len(usubs)):
+            Ii=Isubs==usubs[i]
+            Ij=Isubs==usubs[j]
+            ksum+=np.sum(K[Ii,:][:,Ij])
+            N+=sum(Ii)*sum(Ij)
+    
+    div = ( ksum/N )**(-1)
+    return div

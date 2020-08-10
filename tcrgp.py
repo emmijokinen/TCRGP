@@ -922,7 +922,7 @@ def kfold_stratified(datafile,organism,epi,pc,k=200,cdr_types=[[],['cdr3']],l=[1
     return y, inds, ps
 
 
-def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],m_iters=5000,lr=0.005,nZ=0,mbs=0,lmax3=None, clip=[0,0],delimiter=',',va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope', check_v='none',balance_controls=True):
+def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],m_iters=5000,lr=0.005,nZ=0,mbs=0,lmax3=None, clip=[0,0],delimiter=',',va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope', check_v='none',balance_controls=True):
     """
     Train classifier with TCRGP. Returns training AUC and parameters required for the rebuilding of the model.
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not

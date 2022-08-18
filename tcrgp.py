@@ -8,6 +8,14 @@ from scipy.cluster.vq import kmeans2
 import csv
 import matplotlib.pyplot as plt
 
+# Use tf version 1.8. If using tf version >= 2, change its behaviour to tf 1 behaviour.
+from packaging import version
+if version.parse(tf.__version__) >= version.parse('2.0'):
+    import tensorflow.compat.v1 as tf
+    tf.disable_v2_behavior()
+else:
+    import tensorflow as tf
+
 alphabet='ARNDCEQGHILKMFPSTWYV-'
 # subsmatfromAA2 assumes the alphabet has length 21 and that the last character is for the gap.
 # Consider this when changing the alphabet
@@ -186,11 +194,13 @@ def file2dict(filename,key_fields,store_fields,delimiter='\t'):
             sub_dict[key].append(store)
     return dictionary
     
-def create_cdr_dict(alignment='imgt',species=['human']):
+def create_cdr_dict(alignment='imgt',species=['human'], alphabet_db_file_path='data/alphabeta_db.tsv'):
     """Creates a dictionary of the CDRs (1, 2, and 2.5) corresponding to each V-gene. 
     If alignment='imgt', the CDRs will be aligned according to imgt definitions.
-    Dictionary has form cdrs12[organism][chain][V-gene] = [cdr1,cdr2,cdr2.5]"""   
-    cdrs_all=file2dict('data/alphabeta_db.tsv',key_fields=['organism','chain','region','id'],store_fields=['cdrs'])
+    Dictionary has form cdrs12[organism][chain][V-gene] = [cdr1,cdr2,cdr2.5].
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+    """
+    cdrs_all=file2dict(alphabet_db_file_path, key_fields=['organism','chain','region','id'],store_fields=['cdrs'])
     cdrs = {}
     for organism in species:
         cdrs[organism]={}
@@ -241,11 +251,14 @@ def split_v(v):
     return([v,subgroup,name,allele])
 
 
-def create_minimal_v_cdr_list(organism='human',chain='B',cdrtypes=['cdr1','cdr2','cdr25']):
+def create_minimal_v_cdr_list(organism='human',chain='B',cdrtypes=['cdr1','cdr2','cdr25'],
+                              alphabet_db_file_path='data/alphabeta_db.tsv'):
     """Create a list that determines minimal level of information (subgroup, name, allele) 
     needed to determine the wanted cdrtypes (cdr1, cdr2, cdr25).
-    Possible organism are human and mouse and possible chains are A and B."""
-    cdrs = create_cdr_dict(species=[organism])
+    Possible organism are human and mouse and possible chains are A and B.
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+    """
+    cdrs = create_cdr_dict(species=[organism], alphabet_db_file_path=alphabet_db_file_path)
     v_list=[]
     c_list=[]
     for v in cdrs[organism][chain]:
@@ -286,7 +299,8 @@ def create_minimal_v_cdr_list(organism='human',chain='B',cdrtypes=['cdr1','cdr2'
                         vc_list.append([sub,name,allele,c])
     return vc_list
 
-def extract_cdrs_from_v(vgenes, organism, chain, cdrtypes,correctVs=True,check_v='none'):
+def extract_cdrs_from_v(vgenes, organism, chain, cdrtypes,correctVs=True,check_v='none',
+                        alphabet_db_file_path='data/alphabeta_db.tsv'):
     """Get requested cdrs (cdr_types) from the vgenes where possible. 
     If all requested cdrs could not be obtained from a vgenes, empty entries are returned in their place
     organism: human/mouse
@@ -295,15 +309,16 @@ def extract_cdrs_from_v(vgenes, organism, chain, cdrtypes,correctVs=True,check_v
     correctVs: If True, attempt to chage V-genes in correct format
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
-    
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+
     Returns lists of CDRs ([CDR1s, CDR2s, CDR2.5s]) determined from the V-genes. If CDRs for a V-gene 
         could not be obtained, the corresponding location is left empty.
     """
     if correctVs:
         vgenes=[correct_vgene(v,chain) for v in vgenes]
     
-    cdrs12 = create_cdr_dict(species=[organism])
-    vc_list = create_minimal_v_cdr_list(organism,chain,cdrtypes)
+    cdrs12 = create_cdr_dict(species=[organism], alphabet_db_file_path=alphabet_db_file_path)
+    vc_list = create_minimal_v_cdr_list(organism,chain,cdrtypes, alphabet_db_file_path=alphabet_db_file_path)
     
     ics = []
     if 'cdr1' in cdrtypes:
@@ -373,7 +388,10 @@ def read_vs_cdr3s_epis_subs(datafile,va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b'
     
     return va_vb_3a_3b_ep_su
 
-def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None,va='va',vb='vb', cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope',subs='subject',check_v='none',balance_controls=True,encoding='bytes'):
+def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None,
+                       va='va',vb='vb', cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope',subs='subject',
+                       check_v='none',balance_controls=True,encoding='bytes',
+                       alphabet_db_file_path='data/alphabeta_db.tsv'):
     """Get sequence lists of the requested cdr_types from datafile
     organism: human/mouse
     epi: epitope name in datafile (ignored if balance_controls=False)
@@ -386,7 +404,8 @@ def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
     balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
-    
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+
     Returns epitopes, subjects, cdr_lists, lmaxes, Itest (which indicates which of the given TCRs were returned)
     """
     # Read data file and extract requested information
@@ -417,7 +436,7 @@ def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None
         seq_lists.append(tcrs2nums(cdr3as))
         
     if any([ c in ['cdr1','cdr2','cdr25'] for c in cdr_types[0]]):
-        cdrs = extract_cdrs_from_v(vas,organism,'A',cdr_types[0],correctVs=True,check_v=check_v)
+        cdrs = extract_cdrs_from_v(vas,organism,'A',cdr_types[0],correctVs=True,check_v=check_v, alphabet_db_file_path=alphabet_db_file_path)
         for clist in cdrs:
             if len(clist)>0:
                 cs, I = remove_starred(clist)
@@ -441,7 +460,7 @@ def get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3=None
         seq_lists.append(tcrs2nums(cdr3bs))
         
     if any([ c in ['cdr1','cdr2','cdr25'] for c in cdr_types[1]]):
-        cdrs = extract_cdrs_from_v(vbs,organism,'B',cdr_types[1],correctVs=True,check_v=check_v)
+        cdrs = extract_cdrs_from_v(vbs,organism,'B',cdr_types[1],correctVs=True,check_v=check_v, alphabet_db_file_path=alphabet_db_file_path)
         for clist in cdrs:
             if len(clist)>0:
                 cs, I = remove_starred(clist)
@@ -523,14 +542,18 @@ def get_stratified_folds(y,k=200):
 
 # Plotting
 
-def plot_aurocs_ths(y_list,p_list,epi='',thresholds=[0.0, 0.05, 0.1, 0.2],dpi=200,figsize=(10,3)):
+def plot_aurocs_ths(y_list,p_list,epi='',thresholds=[0.0, 0.05, 0.1, 0.2],dpi=200,figsize=(10,3),
+                    save_plot_path=None, return_best_threshold=False):
     """plot AUROC and threshold values
     y_list: list of arrays or array of class labels (1,0). If list of arrays, different ROC is plotted for each array.
     p_list: list of arrays or array of predictions.
     epi: name of the epitope or other string to be added in the beginning of the figure title.
     thresholds: False positive rates for which prediction thresholds will be shown.
-    
+    save_plot_path: Path for saving the final plot. If None, the plot will be shown.
+    return_best_threshold: If True, adds to the returned variables list the value of the best threshold found.
+
     Returns mean AUROC, mean weighted AUROC and AUROC across all folds, in addition to producing the figure.
+    If return_best_threshold is True, also returns the best threshold.
     """
     
     f=plt.figure(figsize=figsize,dpi=dpi)
@@ -601,10 +624,15 @@ def plot_aurocs_ths(y_list,p_list,epi='',thresholds=[0.0, 0.05, 0.1, 0.2],dpi=20
     plt.title(epi+' AUROC: {:1.4f}'.format(auc_all))
     plt.legend(handles=legs,labels=labels,loc=(1.1,0.6))   
 
-    plt.show()
-    
-    return mean_auc, mean_wt_auc, auc_all
+    if save_plot_path is not None:
+        plt.savefig(save_plot_path, dpi=500, bbox_inches='tight')
+    else:
+        plt.show()
 
+    if return_best_threshold==False:
+        return mean_auc, mean_wt_auc, auc_all
+    else:
+        return mean_auc, mean_wt_auc, auc_all, th[i_best]
 
 # Construct kernels, select inducing points, train and load models
 
@@ -686,7 +714,11 @@ def print_model_info(model):
         print('{:s}: {:.4f}'.format(c,variances[i]),end=' ')
     print('\nclip cdr3s: {:d} from beginning, {:d} from end'.format(clip[0],clip[1]))
                           
-def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0], m_iters=5000,lr=0.005,nZ=0,mbs=0, clip=[0,0],min_subjects=5,cv=5,delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs='subject',epis='epitope', check_v='none'):
+def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],
+         m_iters=5000,lr=0.005,nZ=0,mbs=0, clip=[0,0],min_subjects=5,cv=5,delim=',',
+         va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs='subject',epis='epitope', check_v='none',
+         save_plots_path=None, return_best_threshold=False, balance_controls=True,
+         alphabet_db_file_path='data/alphabeta_db.tsv'):
     """
     Leave-on-subject-out cross-validation with TCRGP
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
@@ -714,12 +746,19 @@ def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0], m_i
     check_v: if 'none', no checking is done, if the v-gene is incomplete (e.g. no allele is given), the function will fail. 
             If 'ignore', TCRs with incomplete V-genes are ignored. If 'deduce' all TCRs with V-genes from which the 
             requested CDRs (CDR1, CDR2, CDR2.5) can be deduced from, are utilized, and other TCRs are ignored.
-    
-    Returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds and plots the AUROCs.
+    save_plots_path: str. path for saving the ROC plot.
+    return_best_threshold: boolean. If true, function returns also the best threshold that was found from the ROC plot.
+    balance_controls: if True, when epitope-specific TCRs are removed, remove also corresponding amount of control TCRs.
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+
+    Returns mean AUC, mean weighted AUC, class lists for all subjects/folds, predictions for all subjects/folds and plots the AUROCs, (best threshold, only if return_best_threshold=True)
     """
     
     # Read data file and extract requested CDRs
-    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None,va,vb, cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=True)       
+    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None,va,vb,
+                                                              cdr3a,cdr3b,epis,subs,check_v=check_v,
+                                                              balance_controls=balance_controls,
+                                                              alphabet_db_file_path=alphabet_db_file_path)
 
     # encode with pc components
     d = pc.shape[0]
@@ -761,11 +800,20 @@ def loso(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0], m_i
         y_list.append(y[~I])
         p_list.append(p)
     print('\rAll folds ({:d}) computed.  '.format(n_subs))
-    
-    mean_auc, mean_wt_auc, auc_all = plot_aurocs_ths(y_list,p_list,epi)
-    return [mean_auc, mean_wt_auc, y_list, p_list]
 
-def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],m_iters=5000,lr=0.005,nZ=0,mbs=0,clip=[0,0],delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs=None,epis='epitope',check_v='none',balance_controls=True):
+    if return_best_threshold==False:
+        mean_auc, mean_wt_auc, auc_all = plot_aurocs_ths(y_list,p_list,epi, save_plot_path=save_plots_path,
+                                                         return_best_threshold=return_best_threshold)
+        return [mean_auc, mean_wt_auc, y_list, p_list]
+    else:
+        mean_auc, mean_wt_auc, auc_all, best_threshold = plot_aurocs_ths(y_list,p_list,epi, save_plot_path=save_plots_path,
+                                                                         return_best_threshold=return_best_threshold)
+        return [mean_auc, mean_wt_auc, y_list, p_list, best_threshold]
+
+
+def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],m_iters=5000,lr=0.005,nZ=0,mbs=0,
+        clip=[0,0],delim=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b', subs=None,epis='epitope',
+        check_v='none',balance_controls=True, alphabet_db_file_path='data/alphabeta_db.tsv'):
     """
     Leave-on-out cross-validation with TCRGP
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
@@ -790,12 +838,13 @@ def loo(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],m_ite
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
     balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
-    
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+
     Returns AUROC, list of classes, and list of predictions
     """
     
     # Read data file and extract requested CDRs
-    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None, va,vb,cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=balance_controls)
+    epitopes,subjects,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delim,clip,None, va,vb,cdr3a,cdr3b,epis,subs,check_v=check_v,balance_controls=balance_controls, alphabet_db_file_path=alphabet_db_file_path)
 
     # encode with pc components
     d = pc.shape[0]
@@ -922,7 +971,11 @@ def kfold_stratified(datafile,organism,epi,pc,k=200,cdr_types=[[],['cdr3']],l=[1
     return y, inds, ps
 
 
-def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],var=[1.0],m_iters=5000,lr=0.005,nZ=0,mbs=0,lmax3=None, clip=[0,0],delimiter=',',va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope', check_v='none',balance_controls=True):
+def train_classifier(datafile,organism,epi,pc, cdr_types=[[],['cdr3']],
+                     l=[1.0],var=[1.0],m_iters=5000,lr=0.005,nZ=0,mbs=0,lmax3=None,
+                     clip=[0,0],delimiter=',', va='va',vb='vb',cdr3a='cdr3a',cdr3b='cdr3b',epis='epitope',
+                     check_v='none',balance_controls=True, return_preds=False,
+                     alphabet_db_file_path='data/alphabeta_db.tsv'):
     """
     Train classifier with TCRGP. Returns training AUC and parameters required for the rebuilding of the model.
     datafile: delimeted file which contains columns Epitope, Subject, va, vb, cdr3a, cdr3b. If some of them are not
@@ -947,12 +1000,19 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],va
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
     balance_controls: if True, when epitope-specific TCRs are removed, remove also correponding amount of control TCRs.
-    
-    Returns AUROC (for the training data) and parameters of the trained model
+    return_preds: if True, adds the predicted values from the classifier to the returned values.
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+
+    Returns AUROC (for the training data) and parameters of the trained model.
+    If return_preds=True, returns predictions as well.
     """
      
     # Read data file and extract requested CDRs
-    epitopes,_,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,delimiter,clip,lmax3,va,vb,cdr3a,cdr3b,epis,subs=None,check_v=check_v,balance_controls=balance_controls)
+    epitopes,_,cdr_lists,lmaxes,_ = get_sequence_lists(datafile,organism,epi,cdr_types,
+                                                       delimiter,clip,lmax3,
+                                                       va,vb,cdr3a,cdr3b,epis,subs=None,
+                                                       check_v=check_v,balance_controls=balance_controls,
+                                                       alphabet_db_file_path=alphabet_db_file_path)
     
     # Class labels
     y = np.zeros((len(epitopes),1),dtype=int)
@@ -978,8 +1038,12 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],va
         ls, vs = [], []
         if len(cdr_lists)>1:
             for i in range(len(cdr_lists)):
-                ls.append(m.kern.kernels[i].lengthscales.value)
-                vs.append(m.kern.kernels[i].variance.value)
+                try:
+                    ls.append(m.kern.kernels[i].lengthscales.value)
+                    vs.append(m.kern.kernels[i].variance.value)
+                except AttributeError: # some tf versions have kern_list instead of kernels
+                    ls.append(m.kern.kern_list[i].lengthscales.value)
+                    vs.append(m.kern.kern_list[i].variance.value)
         else:
             ls.append(m.kern.lengthscales.value)
             vs.append(m.kern.variance.value)
@@ -996,9 +1060,14 @@ def train_classifier(datafile,organism,epi,pc,cdr_types=[[],['cdr3']],l=[1.0],va
         p, _ = m.predict_y(X)
     
     auc = roc_auc(y,p) # Training AUC
-    return auc, param_list
 
-def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b='cdr3b', delimiter=',',encoding='bytes',check_v='none'):
+    if return_preds==False:
+        return auc, param_list
+    else:
+        return auc, param_list, p
+
+def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b='cdr3b',
+            delimiter=',',encoding='bytes',check_v='none', alphabet_db_file_path='data/alphabeta_db.tsv'):
     """Do predictions for the TCRs in the given file. 
     Predictions are returned in the same order as the TCRs in the file.
     datafile: name of the file containing the TCRs for testing
@@ -1011,7 +1080,8 @@ def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b=
     encoding: encoding used in data file.
     check_v: If 'none' accept only complete V-genes, if 'ignore', ignore incomplete V-genes (return empty CDRs),
              if 'deduce', try to deduce CDRs from incomplete V-genes, ignore where this fails.
-    
+    alphabet_db_file_path: path of 'alphabeta_db.tsv' file, originally found in the TCRGP/data folder.
+
     Returns predictions in the same order as the TCRs appear in datafile (nan for TCRs for which no prediction could be made).
     """
     # Extract parameters
@@ -1021,14 +1091,21 @@ def predict(datafile, params, organism='human',va=None,vb=None,cdr3a=None,cdr3b=
         is_sparse = True
     else:
         is_sparse = False
-    
-    i=0
-    if 'cdr3' in cdr_types[0] and 'cdr3' in cdr_types[1]:
-        i+=1
-    lmax3=[lmaxes[0],lmaxes[i]]
-    
+
+    num_cdrs_alpha = 0
+    lmax3_alpha = 0
+    lmax3_beta = 0
+    if 'cdr3' in cdr_types[0]:
+        lmax3_alpha = lmaxes[cdr_types[0].index('cdr3')]
+    if 'cdr3' in cdr_types[1]:
+        lmax3_beta = lmaxes[num_cdrs_alpha + cdr_types[1].index('cdr3')]
+    lmax3 = [lmax3_alpha, lmax3_beta]
+
     # Read data file and extract requested CDRs
-    _,_,cdr_lists,lmaxes,Itest = get_sequence_lists(datafile,organism,None,cdr_types,delimiter,clip,lmax3,va,vb,cdr3a,cdr3b,epis=None,subs=None,check_v=check_v,balance_controls=False,encoding=encoding) 
+    _,_,cdr_lists,lmaxes,Itest = get_sequence_lists(datafile,organism,None,cdr_types,delimiter,clip,lmax3,
+                                                    va,vb,cdr3a,cdr3b,epis=None,subs=None,check_v=check_v,
+                                                    balance_controls=False,encoding=encoding,
+                                                    alphabet_db_file_path=alphabet_db_file_path)
                 
     X_test = encode_with_pc(cdr_lists,lmaxes,pc) 
     predictions = np.nan*np.ones((len(Itest),1))
